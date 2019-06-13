@@ -7,24 +7,351 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(e1071) # for skewness
+library(zoo) # for na.aggregate which replaces N/A with the mean for the respective group
+library(randomForest)
+library(rpart)
+library(elasticnet) # for lasso and ridge and elasticnet regression
+library(pls) # for principle component analysis
+library(fastICA) # for Independent Component regression
+library(monomvn)
 ```
 
-## R Markdown
+## Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+It is without a doubt that many cities have become extremely successful over recent years. Many authors have followed and described this and have demonstrated the clear advantage that cities like New York have over others (Glaeser, 2011). As an answer to decaying urban cores, Richard Florida started to use metrics to compare cities and advocated for changes to attract the so-called *creative class* in order to stimulate innovation and also foster new and vibrant neighbourhoods for these professionals to play and stimulate the local economy (Florida, 2002). Over just 15 years this development has led to an enormous income gap between the *creatives* and the other residents of the cities and home prices have increased such that displacement of people is common (Florida, 2017). Cities like New York, San Francisco and London are so expensive that wealthy buy property simply as a trophy or a sign that they can invest in buildings with the highest value.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+As an MSc student in Urban Studies the prediction of house prices is very interesting. Prices are generally higher near important transportation nodes like train stations (Debrezion et al., 2007). However, there is also a psychological and social component that can determine how much someone is willing to pay for a home in a desirable location (Smith, 2011). To explore this I looked for a dataset that I could use to test some of these observations.
 
-```{r cars}
-summary(cars)
+Kaggle had a relevant dataset which can be found at <https://www.kaggle.com/new-york-city/nyc-property-sales>. This semi-cleaned dataset includes all properties sold between September 2016 and September 2017 in the 5 boroughs of New York City. For clarification, the corresponding numbers in the dataset are as follows: 1 = Manhattan, 2 = Bronx, 3 = Brooklyn, 4 = Queens and 5 = Staten Island. To focus on actual homes, building classifications were used to select out appropriate data. To summarize these codes, A = single-family, B = two-family, C = walk-up apartments, D = elevator apartments and L = lofts.
+
+### Aim
+
+The aim of this project was to develop a machine learning regression model that would predict sale price (outcome) from available building characteristics (5 predictors). The relative success of this model in terms of RMSE could be used to comment on whether home prices are a still a function of lot size, area and location or if they are simply a product of psychology or wealthy investment desires.
+
+## Methods
+
+The dataset for this project was Kaggle's NYC Property Sales which can be downloaded at <https://www.kaggle.com/new-york-city/nyc-property-sales> or as a csv in the GitHub for this project.
+
+### Pre-processing and wrangling
+
+```{r}
+nycproperties <- read_csv("C:/RCoding/nyc-property-sales/nyc-rolling-sales.csv")
+colnames(nycproperties)
+dim(nycproperties)
+```
+There were 23 variables (columns) of various type, some which were more informative than others. After inspection and based on previous investigation of property prices several variables were selected. The **outcome** was *SALE PRICE* and some candidates for the predictors, *LAND SQUARE FEET*, *GROSS SQUARE FEET* and *SALE DATE*, were converted to numeric or date. A new field, *BuildingAge*, was calculated from the Year Built data. 
+
+```{r}
+nycproperties$`SALE PRICE` <- as.numeric(as.character((nycproperties$`SALE PRICE`)))
+class(nycproperties$`SALE PRICE`)
+nycproperties$`LAND SQUARE FEET` <- as.numeric(as.character((nycproperties$`LAND SQUARE FEET`)))
+class(nycproperties$`LAND SQUARE FEET`)
+nycproperties$`GROSS SQUARE FEET` <- as.numeric(as.character((nycproperties$`GROSS SQUARE FEET`)))
+class(nycproperties$`GROSS SQUARE FEET`)
+nycproperties$`SALE DATE` <- as.Date(as.character((nycproperties$`SALE DATE`)))
+class(nycproperties$`SALE DATE`)
+# Create new column for BuildingAge and fill with data
+nycproperties[c("BuildingAge")] <- 2019 - nycproperties$`YEAR BUILT`
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+The dataset had many missing values in most variables and this presented a problem for analysis. One could replace these values with 0 but instead the following code was used to convert NA values to the mean value for the respective column/variable.
+```{r}
+checknumeric <- sapply(nycproperties, is.numeric)
+nycproperties[checknumeric] <- lapply(nycproperties[checknumeric], na.aggregate)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Since these data are for the sale of all types of property it presented a challenge for predicting the prices of living spaces specifically. For example, sale prices of 0 were often found in the commercial or government properties. Condominiums (Class R) lacked information on lot size or gross square feet and these missing values complicated the modeling considerably. To build a model using the most predictors, the dataset was reduced (**livingspaces**) to include only building classes with the most complete data on actual home or apartment prices.
+
+```{r}
+livingspaces <- nycproperties %>%
+  filter(str_detect(`BUILDING CLASS AT TIME OF SALE` ,"A") | 
+         str_detect(`BUILDING CLASS AT TIME OF SALE` ,"B") |
+         str_detect(`BUILDING CLASS AT TIME OF SALE` ,"C") |
+         str_detect(`BUILDING CLASS AT TIME OF SALE` ,"D") |
+         str_detect(`BUILDING CLASS AT TIME OF SALE` ,"L"))
+```
+
+Data were then explored and potential predictor variables contained many extreme outliers or unrealistic values (e.g. sale price = $0). These were excluded using the following code.
+
+```{r}
+livingspaces <- livingspaces %>%
+  filter((`SALE PRICE` > 20 & `SALE PRICE` < 100000000) &
+           BuildingAge > 0 & BuildingAge < 500 & 
+           `TOTAL UNITS` > 0 & `TOTAL UNITS`< 500 &
+           `GROSS SQUARE FEET`> 0 & `LAND SQUARE FEET` > 0 )
+```
+
+At this stage the dataset was reduced to 34530 observations from an initial 84548. Excluding over half of the dataset in the pre-processing stage raises many issues which will be addressed later.
+
+### Data visualization
+
+Complete plots of all potential predictors can be seen by running the entire R code file. For this report key figures were selected.
+
+```{r}
+skewness(livingspaces$`SALE PRICE`, type = 1)
+skewness(livingspaces$BuildingAge, type = 1)
+skewness(livingspaces$`GROSS SQUARE FEET`, type = 1)
+skewness(livingspaces$`LAND SQUARE FEET`, type = 1)
+skewness(livingspaces$`TOTAL UNITS`, type = 1)
+```
+
+All data except for BuildingAge were skewed and the range was very large. During the development and testing stages a log transformation of these predictors was made and this helped in RMSE calculations. However, many regression models are not valid on log transformed data and produce a model that cannot be easily used with actual sale price numbers. So despite problems with the distribution, raw data was used for the remainder of the project.
+
+```{r}
+livingspaces %>%
+  filter(`SALE PRICE` > 100000 & `SALE PRICE` < 5000000) %>%
+  ggplot(aes(`SALE PRICE`)) +
+  geom_histogram(binwidth = 100000, fill = "lightsteelblue")
+```
+The left shift of the *Sale Price* data is clearly visible in this graph. Note also the peak which is a result of replacing NA values with the mean value for the Sale Price group.
+
+```{r}
+livingspaces %>%
+  ggplot(aes(BOROUGH)) +
+  geom_bar(fill = "lightsteelblue") +
+  ylab("Property count") +
+  ggtitle("Frequency by NYC borough")
+```
+The number of properties on Manhattan (Borough = 1) dropped significantly after selection by property type. This could also reflect a lack of houses or rentals on Manhattan.
+
+```{r}
+livingspaces %>%
+  group_by(BOROUGH) %>%
+  summarise(n = n(), avg = mean(`SALE PRICE`), se = sd(`SALE PRICE`)/sqrt(n())) %>%
+  ggplot(aes(x = BOROUGH, y = avg, ymin = avg - 2*se, ymax = avg + 2*se)) +
+  geom_point() +
+  geom_errorbar() +
+  xlab("Borough") +
+  ylab("Mean sale price") +
+  ggtitle("Sale prices by NYC borough")
+```
+Another problem is that prices in Manhattan were much higher than the other 4 boroughs. This creates an immediate outling group which may more may not affect the regression modeling. This could be a reason to exclude the Manhattan data altogether.
+
+The next step was to check whether there is a relationship between *Sale Price* and the potential predictors.
+```{r}
+livingspaces %>%
+  ggplot(aes(`SALE DATE`,`SALE PRICE`)) +
+  geom_point() +
+  geom_smooth(na.rm = TRUE, color = "red", size = 0.1, method = lm) +
+  ggtitle("Sale prices by date of sale")
+```
+*Sale Price* did not seem to vary by *Sale Date* suggesting that overall prices were fairly stable over the 1-year data period. Because of this *Sale Date* was excluded from the predictor list.
+
+```{r}
+livingspaces %>%
+  ggplot(aes(BuildingAge,`SALE PRICE`)) +
+  geom_point() +
+  geom_smooth(color = "red", size = 0.1, method = lm) +
+  xlab("Building Age (years)") +
+  ylab("Sale Price") +
+  ggtitle("Sale prices by age of building")
+```
+*Sale Price* did vary by *BuildingAge* so this chosen as a predictor. Note that buildings around 100 years old had the highest price.
+
+```{r}
+livingspaces %>%
+  ggplot(aes(`TOTAL UNITS`,`SALE PRICE`)) +
+  geom_point() +
+  geom_smooth(color = "red", size = 0.1, method = lm) +
+  xlab("Number of Units") +
+  ylab("Sale Price") +
+  ggtitle("Sale prices by number of units")
+```
+*Sale Price* also varied by *Total Units* so this was a predictor.
+
+```{r}
+livingspaces %>%
+  ggplot(aes(`LAND SQUARE FEET`,`SALE PRICE`)) +
+  geom_point() +
+  geom_smooth(color = "red", size = 0.1, method = lm) +
+  xlab("Land Square Feet") +
+  ylab("Sale Price") +
+  ggtitle("Sale prices by area of lot")
+```
+*Sale Price* varied according to *Land Square Feet*, which makes sense if the land value is determining the overall price.
+
+```{r}
+livingspaces %>%
+  ggplot(aes(`GROSS SQUARE FEET`,`SALE PRICE`)) +
+  geom_point() +
+  geom_smooth(color = "red", size = 0.1, method = lm) +
+  xlab("Gross Square Feet") +
+  ylab("Sale Price") +
+  ggtitle("Sale prices by living area")
+```
+Similarly, the *Sale Price* varied with *Gross Square Feet*, indicating that one can sell a building for a higher price if it has more living space in it. Outliers were still observed in all of the above graphs and perhaps more data could be excluded. But given the loss of half the dataset already it was decided to proceed with the remaining despite potential risks.
+
+## Data partitioning
+
+```{r}
+livingspaces <- livingspaces[, !(colnames(livingspaces) %in% c("X1", "BLOCK", "NEIGHBORHOOD", "BUILDING CLASS CATEGORY",
+                                                               "TAX CLASS AT PRESENT", "LOT", "EASE-MENT", "BUILDING CLASS AT PRESENT",
+                                                               "ADDRESS", "APARTMENT NUMBER", "ZIP CODE", "RESIDENTIAL UNITS",
+                                                               "COMMERCIAL UNITS", "TAX CLASS AT TIME OF SALE", "YEAR BUILT", 
+                                                               "BUILDING CLASS AT TIME OF SALE", "SALE DATE"))]
+```
+Unnecessary columns were removed and the final model consisted of 6 variables. The outcome was *Sale Price* and the 5 predictors were *Borough*, *Total Units*, *Land Square Feet*, *Gross Square Feet* and *BuildingAge*.
+
+Data were partitioned as follows:
+```{r}
+set.seed(1)
+test_index <- createDataPartition(y = livingspaces$`SALE PRICE`, times = 1, p = 0.1, list = FALSE)
+livingtrain <- livingspaces[-test_index,] 
+livingtest <- livingspaces[test_index,]
+rm(test_index)
+```
+This produced a test set (livingtest) that was 10% of the total livingspaces dataset.
+
+## Modeling and Results
+
+To predict the continuous variable *Sale Price* a regression approach was used. When using this errors should be reported using the Root Mean Squared Error, or RMSE. This function was defined according to the following code:
+
+```{r}
+RMSE <- function(true_price, predicted_price){
+  sqrt(mean((true_price - predicted_price)^2))
+}
+```
+
+As discussed previously, these data should have been log transformed and doing so would have produced the type of RMSE more usual in machine learning courses. However, earlier testing in this project found that log transformation meant that only linear regression gave any valid results. Since the point of this capstone was to also move beyond linear models, it was decided to use *Sale Prices* in their raw form and note the change in RMSE over models, not the actual RMSE value itself. 
+
+### Model 1
+```{r}
+mu_hat <- mean(livingtrain$`SALE PRICE`)
+meanRMSE <- RMSE(livingtest$`SALE PRICE`, mu_hat)
+
+rmse_results <- data_frame(Model = "Mean sale price", RMSE = meanRMSE)
+rmse_results
+```
+The first model simply predicts that the *Sale Price* would be the mean sale price for the group. It also creates the rmse_results summary data frame to present progress. The final table will be presented at the end.
+
+### Model 2 
+```{r}
+lmGross <- train(`SALE PRICE` ~ `GROSS SQUARE FEET`, data=livingtrain, method = "lm")
+lmGross
+predictedmodel2 <- predict(lmGross, livingtest)
+lmGrossRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel2)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Linreg Gross Area",
+                                     RMSE = lmGrossRMSE ))
+```
+The second model was a linear regression including only *Gross Square Feet* as a predictor. This variable was most correlated with *Sale Price* and reduced RMSE significantly compared to Model 1.
+
+### Model 3
+```{r}
+lmAll <- train(`SALE PRICE` ~ ., data=livingtrain, method = "lm")
+lmAll
+predictedmodel3 <- predict(lmAll, livingtest)
+lmAllRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel3)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Linreg All Predictors",
+                                     RMSE = lmAllRMSE ))
+```
+The third model used linear regression and all of the predictors. This reduced the RMSE value again.
+
+### Model 4
+```{r}
+lmnoBorough <- train(`SALE PRICE` ~ BuildingAge + `TOTAL UNITS` + `LAND SQUARE FEET` + `GROSS SQUARE FEET`, data=livingtrain, method = "lm")
+lmnoBorough
+predictedmodel4 <- predict(lmnoBorough, livingtest)
+lmnoBoroughRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel4)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Linreg without Borough",
+                                     RMSE = lmnoBoroughRMSE ))
+```
+Since the *Borough* data was so skewed in that Manhattan prices were much higher than the other 4 boroughs, a linear regression without this predictor was made in Model 4. However, this increased the RMSE. 
+
+### Model 5
+```{r}
+fitLasso <- train(`SALE PRICE` ~ ., data=livingtrain, method = "lasso", 
+                  tuneGrid = data.frame(fraction = seq(0.1, 1, 0.1)))
+fitLasso
+predictedmodel5 <- predict(fitLasso, livingtest)
+lassoRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel5)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Lasso regression",
+                                     RMSE = lassoRMSE ))
+```
+The next model tried Lasso regression as a was to predict the outcome *Sale Price*. The model was tuned according to *fraction*.
+
+### Model 6
+```{r}
+fitPCR <- train(`SALE PRICE` ~ ., data=livingtrain, method = "pcr",
+                tuneGrid = data.frame(ncomp = seq(1, 5, 0.5)))
+fitPCR
+predictedmodel6 <- predict(fitPCR, livingtest)
+PCRRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel6)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Principal component analysis",
+                                     RMSE = PCRRMSE ))
+```
+Principal component analysis was tested next, and tuned according to *ncomp*.
+
+### Model 7
+```{r}
+fitEnet <- train(`SALE PRICE` ~ ., data=livingtrain, method = "enet")
+fitEnet
+predictedmodel7 <- predict(fitEnet, livingtest)
+EnetRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel7)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Elasticnet regression",
+                                     RMSE = EnetRMSE ))
+```
+Model 7 was an Elasticnet regression. Default tune parameters gave the best RMSE.
+
+### Model 8
+```{r}
+fitRidge <- train(`SALE PRICE` ~ ., data=livingtrain, method = "ridge",
+                  tuneGrid = data.frame(lambda = seq(0, 0.1, 0.01)))
+fitRidge
+predictedmodel8 <- predict(fitRidge, livingtest)
+RidgeRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel8)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="Ridge regression",
+                                     RMSE = RidgeRMSE ))
+```
+Ridge regression was tuned according to *lambda* values.
+
+### Model 9
+```{r}
+fitICR <- train(`SALE PRICE` ~ ., data=livingtrain, method = "icr",
+                tuneGrid = data.frame(n.comp = seq(1, 5, 0.5)))
+fitICR
+predictedmodel9 <- predict(fitICR, livingtest)
+ICRRMSE <- RMSE(livingtest$`SALE PRICE`, predictedmodel9)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Model="ICR regression",
+                                     RMSE = ICRRMSE ))
+```
+The Independent Component Regression was tuned using *n.comp*.
+
+### Model 10
+
+The final model was used was a Bayesian ridge regression. The code for this can be seen in the R file. It was excluded here for visual purposes due to the long running time and its output of t and m values.
+
+### Final comparison of RMSE
+
+The final list of RMSEs sorted by increasing value can be seen here.
+```{r}
+rmse_results %>% 
+  arrange(RMSE) %>%
+  knitr::kable()
+```
+
+## Conclusion
+
+With this approach it was possible to predict the sale price of living spaces in New York City using 5 predictor variables available in the Kaggle dataset. However, the considerable amount of missing or nonsensical data meant that over half of the dataset was excluded from the start. The remaining data was skewed further which resulted in high RMSE values. Nonetheless, **ridge regression** provided the best model for these data according to RMSE. It would be interesting to validate this using housing price datasets from other areas which are larger and cleaner in terms of realistic values. 
+
+Excluding data for Manhattan may have improved these numbers given that they were outliers. However, this also illustrates that property prices for the most desirable areas of large cities is no longer determined by structural properties like size or land area. These may reflect proximity to transport or major landmarks or sites of business (Debrezion et al., 2007). It could also reflect the subjective or psychological component of prices in that people are willing to pay more for the most desirable locations (Smith, 2011). In conclusion, home prices for boroughs outside of Manhattan may still be predictable according to lot size and area. But prices in Manhattan seem to be much more complicated and more difficult to predict with this type of dataset and regression approach.
+
+## References
+
+Debrezion, G., Pels, E. Rietvald, P. (2007), The impact of railway stations on residential and commercial property value, Journal of Real Estate Finance and Economics, 35:161-180.
+Florida, R. (2002). The Rise of the Creative Class. New York: Basic Books.
+Florida, R. (2017). The New Urban Crisis. New York: Basic Books.
+Glaeser, E. (2011). Triumph of the city: How our greatest invention makes us richer, smarter, greener, healthier and happier. Pan Macmillan.
+Smith, S. J. (2011) Home Price Dynamics: a Behavioural Economy? Housing, Theory and Society, 28:3, 236-261.
+
+Code and dataset are included in my GitHub at <https://github.com/nordicbychris/NYCPropertyMLEdxProject20190613.git>. This project is for the Capstone course of the HarvardX Data Science professional certification program.
