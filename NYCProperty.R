@@ -10,6 +10,7 @@ library(fastICA) # for Independent Component regression
 library(monomvn) # for Bayesian ridge regression 
 
 #Read in CSV file from my hard drive
+#Data available in my GitHub at https://github.com/nordicbychris/NYCPropertyMLEdxProject20190613.git
 nycproperties <- read_csv("C:/RCoding/nyc-property-sales/nyc-rolling-sales.csv")
 colnames(nycproperties)
 dim(nycproperties)
@@ -59,13 +60,11 @@ livingspaces %>%
   filter(`SALE PRICE` > 100000 & `SALE PRICE` < 5000000) %>%
   ggplot(aes(`SALE PRICE`)) +
   geom_histogram(binwidth = 100000, fill = "lightsteelblue")
+# Note the peak at the mean value due to replacement of NA with the mean
 
 # Histograms of the predictors
 livingspaces %>%
   ggplot(aes(BuildingAge)) +
-  geom_histogram(fill = "lightsteelblue")
-livingspaces %>%
-  ggplot(aes(BOROUGH)) +
   geom_histogram(fill = "lightsteelblue")
 livingspaces %>%
   ggplot(aes(`GROSS SQUARE FEET`)) +
@@ -86,10 +85,11 @@ skewness(livingspaces$`LAND SQUARE FEET`, type = 1)
 skewness(livingspaces$`TOTAL UNITS`, type = 1)
 # All skewed except for BuildingAge. Something to be considered in the analysis later.
 
-# Dot plot of all log sale prices divided into the category borough
+# Dot plot of all sale prices divided into the category borough
 livingspaces %>%
   ggplot(aes(BOROUGH, `SALE PRICE`)) +
   geom_point(color = "lightblue") +
+  ggtitle("Sale prices by NYC borough") +
   coord_flip()
 
 # Plot of the frequency in each borough  
@@ -116,7 +116,8 @@ livingspaces %>%
 livingspaces %>%
   ggplot(aes(`SALE DATE`,`SALE PRICE`)) +
   geom_point() +
-  geom_smooth(na.rm = TRUE, color = "red", size = 0.1, method = lm)
+  geom_smooth(na.rm = TRUE, color = "red", size = 0.1, method = lm) +
+  ggtitle("Sale prices by date of sale")
 # No major change in price over time, so can be excluded from model
 
 # Does the sale price vary according to building age?
@@ -125,7 +126,8 @@ livingspaces %>%
   geom_point() +
   geom_smooth(color = "red", size = 0.1, method = lm) +
   xlab("Building Age (years)") +
-  ylab("Sale Price")
+  ylab("Sale Price") +
+  ggtitle("Sale prices by age of building")
 # Buildings around 100 years old tend to have higher sale price
 
 # Does the sale price vary according to number of units?
@@ -134,7 +136,8 @@ livingspaces %>%
   geom_point() +
   geom_smooth(color = "red", size = 0.1, method = lm) +
   xlab("Number of Units") +
-  ylab("Sale Price")
+  ylab("Sale Price") +
+  ggtitle("Sale prices by number of units")
 # Relationship looks good for higher sale prices (i.e. some prices are probably invalid)
 
 # Does the sale price vary according to the lot area of the property?
@@ -143,7 +146,8 @@ livingspaces %>%
   geom_point() +
   geom_smooth(color = "red", size = 0.1, method = lm) +
   xlab("Land Square Feet") +
-  ylab("Sale Price")
+  ylab("Sale Price") +
+  ggtitle("Sale prices by area of lot")
 # For reasonable-sized lots the relationship looks good
 
 # Does the sale price vary according to the actual size of the living space (i.e gross square feet)?
@@ -152,7 +156,8 @@ livingspaces %>%
   geom_point() +
   geom_smooth(color = "red", size = 0.1, method = lm) +
   xlab("Gross Square Feet") +
-  ylab("Sale Price")
+  ylab("Sale Price") +
+  ggtitle("Sale prices by living area")
 # Same as for lot size, but again the sale prices close to zero seem to affect the relationship.
 # Consider these outliers for the model
 
