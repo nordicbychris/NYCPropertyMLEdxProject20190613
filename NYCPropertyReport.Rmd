@@ -1,7 +1,7 @@
 ---
 title: "NYC Property Price Prediction Using Regression"
 author: "Christopher Pickering"
-date: "2019 M06 13"
+date: "2019 06 13"
 output: html_document
 ---
 
@@ -106,6 +106,8 @@ livingspaces %>%
   ggplot(aes(`SALE PRICE`)) +
   geom_histogram(binwidth = 100000, fill = "lightsteelblue")
 ```
+
+
 The left shift of the *Sale Price* data is clearly visible in this graph. Note also the peak which is a result of replacing NA values with the mean value for the Sale Price group.
 
 ```{r}
@@ -115,6 +117,8 @@ livingspaces %>%
   ylab("Property count") +
   ggtitle("Frequency by NYC borough")
 ```
+
+
 The number of properties on Manhattan (Borough = 1) dropped significantly after selection by property type. This could also reflect a lack of houses or rentals on Manhattan.
 
 ```{r}
@@ -128,6 +132,8 @@ livingspaces %>%
   ylab("Mean sale price") +
   ggtitle("Sale prices by NYC borough")
 ```
+
+
 Another problem is that prices in Manhattan were much higher than the other 4 boroughs. This creates an immediate outling group which may more may not affect the regression modeling. This could be a reason to exclude the Manhattan data altogether.
 
 The next step was to check whether there is a relationship between *Sale Price* and the potential predictors.
@@ -138,6 +144,8 @@ livingspaces %>%
   geom_smooth(na.rm = TRUE, color = "red", size = 0.1, method = lm) +
   ggtitle("Sale prices by date of sale")
 ```
+
+
 *Sale Price* did not seem to vary by *Sale Date* suggesting that overall prices were fairly stable over the 1-year data period. Because of this *Sale Date* was excluded from the predictor list.
 
 ```{r}
@@ -149,6 +157,8 @@ livingspaces %>%
   ylab("Sale Price") +
   ggtitle("Sale prices by age of building")
 ```
+
+
 *Sale Price* did vary by *BuildingAge* so this chosen as a predictor. Note that buildings around 100 years old had the highest price.
 
 ```{r}
@@ -160,6 +170,8 @@ livingspaces %>%
   ylab("Sale Price") +
   ggtitle("Sale prices by number of units")
 ```
+
+
 *Sale Price* also varied by *Total Units* so this was a predictor.
 
 ```{r}
@@ -171,6 +183,8 @@ livingspaces %>%
   ylab("Sale Price") +
   ggtitle("Sale prices by area of lot")
 ```
+
+
 *Sale Price* varied according to *Land Square Feet*, which makes sense if the land value is determining the overall price.
 
 ```{r}
@@ -182,6 +196,8 @@ livingspaces %>%
   ylab("Sale Price") +
   ggtitle("Sale prices by living area")
 ```
+
+
 Similarly, the *Sale Price* varied with *Gross Square Feet*, indicating that one can sell a building for a higher price if it has more living space in it. Outliers were still observed in all of the above graphs and perhaps more data could be excluded. But given the loss of half the dataset already it was decided to proceed with the remaining despite potential risks.
 
 ## Data partitioning
@@ -329,7 +345,7 @@ The Independent Component Regression was tuned using *n.comp*.
 
 ### Model 10
 
-The final model was used was a Bayesian ridge regression. The code for this can be seen in the R file. It was excluded here for visual purposes due to the long running time and its output of t and m values.
+The final model was used was a Bayesian ridge regression. The code for this can be seen in the R file. It was excluded here for visual purposes due to the long running time and its output of t and m values. RMSE value for this was 1956773.
 
 ### Final comparison of RMSE
 
@@ -340,6 +356,8 @@ rmse_results %>%
   knitr::kable()
 ```
 
+Note again that Model 10 Bayesian ridge regression is not in this list as running the code would have cluttered this report. RMSE for this was 1956773.
+
 ## Conclusion
 
 With this approach it was possible to predict the sale price of living spaces in New York City using 5 predictor variables available in the Kaggle dataset. However, the considerable amount of missing or nonsensical data meant that over half of the dataset was excluded from the start. The remaining data was skewed further which resulted in high RMSE values. Nonetheless, **ridge regression** provided the best model for these data according to RMSE. It would be interesting to validate this using housing price datasets from other areas which are larger and cleaner in terms of realistic values. 
@@ -349,9 +367,13 @@ Excluding data for Manhattan may have improved these numbers given that they wer
 ## References
 
 Debrezion, G., Pels, E. Rietvald, P. (2007), The impact of railway stations on residential and commercial property value, Journal of Real Estate Finance and Economics, 35:161-180.
+
 Florida, R. (2002). The Rise of the Creative Class. New York: Basic Books.
+
 Florida, R. (2017). The New Urban Crisis. New York: Basic Books.
+
 Glaeser, E. (2011). Triumph of the city: How our greatest invention makes us richer, smarter, greener, healthier and happier. Pan Macmillan.
+
 Smith, S. J. (2011) Home Price Dynamics: a Behavioural Economy? Housing, Theory and Society, 28:3, 236-261.
 
 Code and dataset are included in my GitHub at <https://github.com/nordicbychris/NYCPropertyMLEdxProject20190613.git>. This project is for the Capstone course of the HarvardX Data Science professional certification program.
